@@ -21,6 +21,13 @@ COPY ./messages ./messages
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY scripts/build.env .env
+
+# Both must be shared across the per-architecture release builds so one tag
+# ships one build: the encryption key makes Server Action IDs (and therefore
+# client chunk hashes) deterministic, NEXT_BUILD_ID pins the Next.js BUILD_ID.
+# Empty/absent values fall back to today's per-build random behavior.
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+ARG NEXT_BUILD_ID
 RUN npm run build
 
 RUN rm -r .next/cache

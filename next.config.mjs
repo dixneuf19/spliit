@@ -24,6 +24,10 @@ if (process.env.S3_UPLOAD_ENDPOINT) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Pin BUILD_ID during releases so both architecture builds of one tag are
+  // identical. `||` (not `??`): CI passes an empty string when unset, which
+  // must fall through to the default random id.
+  generateBuildId: async () => process.env.NEXT_BUILD_ID || null,
   images: {
     remotePatterns
   },

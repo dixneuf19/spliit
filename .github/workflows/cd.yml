@@ -9,10 +9,36 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # One Server Actions encryption key per release, shared by both platform
+  # builds below. Next.js derives Server Action IDs from this key, and the
+  # IDs end up in client chunks, so per-job random keys (the default) make
+  # the two architecture builds diverge: different chunk hashes and action
+  # manifests under one tag, which 404s chunks and rejects cross-pod action
+  # calls on multi-replica mixed-arch deployments. The key is a build input,
+  # not a secret worth protecting: Next.js embeds it verbatim in the image
+  # (.next/server/server-reference-manifest.js), so anyone who can pull the
+  # image can already read it.
+  #
+  # Optional: set a NEXT_SERVER_ACTIONS_ENCRYPTION_KEY repository secret
+  # (openssl rand -base64 32) and it is used instead, making action IDs
+  # stable across releases too, so browser tabs from an older deploy keep
+  # invoking actions (at their new implementation) after a rolling upgrade.
+  # IDs derive from the key plus the action's module path and export name,
+  # so they survive any source change that keeps the action in place.
+  key:
+    runs-on: ubuntu-latest
+    outputs:
+      server-actions-key: ${{ steps.generate.outputs.key }}
+    steps:
+      - name: Generate release-scoped Server Actions key
+        id: generate
+        run: echo "key=$(openssl rand -base64 32)" >> "${GITHUB_OUTPUT}"
+
   # Each platform is built on a runner of that architecture, then pushed
   # untagged (by digest only). Emulating linux/arm64 with QEMU crashes Node
   # during `npm ci` with an illegal instruction, so we never emulate.
   build:
+    needs: [key]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -54,6 +80,11 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: false # Disable provenance to avoid unknown/unknown
           sbom: false       # Disable sbom to avoid unknown/unknown
+          # The secret fallback lives here, not in the key job: outputs that
+          # contain a secret are silently dropped by GitHub Actions.
+          build-args: |
+            NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY || needs.key.outputs.server-actions-key }}
+            NEXT_BUILD_ID=${{ github.ref_name }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.REPO }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
